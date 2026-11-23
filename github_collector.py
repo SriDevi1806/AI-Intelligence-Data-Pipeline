@@ -21,7 +21,7 @@ from logger import logger
 GITHUB_API = "https://api.github.com"
 
 MAX_PAPERS_PER_RUN = int(
-    os.getenv("GITHUB_MAX_PAPERS_PER_RUN", "3")
+    os.getenv("GITHUB_MAX_PAPERS_PER_RUN", "10")
 )
 
 MAX_CANDIDATES = 5
@@ -37,29 +37,26 @@ ARXIV_PATTERN = re.compile(r"\b\d{4}\.\d{4,5}\b")
 
 # Reject research aggregators, paper trackers, and daily paper feeds.
 AGGREGATOR_PATTERN = re.compile(
-    r"\b("
-    r"paper tracker|research radar|arxiv daily|daily arxiv|"
-    r"paper digest|paper feed|paper index|reading list|"
-    r"awesome papers|literature review|research newsletter|"
-    r"paper leaderboard|"
-    r"daily tracking of .*papers|"
-    r"tracking .*papers on arxiv|"
-    r"track .*arxiv papers|"
-    r"arxiv paper monitoring|"
-    r"monitoring .*papers|"
-    r"paper discovery platform|"
-    r"research paper aggregator|"
-    r"collection of .*research papers|"
-    r"curated list of .*papers"
-    r")\b",
+    r"(research[-_ ]radar|paper[-_ ]tracker|"
+    r"arxiv[-_ ]daily|daily[-_ ]arxiv|"
+    r"daily[-_ ]papers|papers[-_ ]daily|"
+    r"paper[-_ ]digest|"
+    r"awesome[-_ ]papers|paper[-_ ]feed|"
+    r"arxiv[-_ ]monitor|paper[-_ ]aggregator|"
+    r"arxiv[-_ ]favor|"
+    r"paper[-_ ]discovery)",
     re.IGNORECASE
 )
 
 AGGREGATOR_REPO_PATTERN = re.compile(
     r"(research[-_ ]radar|paper[-_ ]tracker|"
-    r"arxiv[-_ ]daily|paper[-_ ]digest|"
+    r"arxiv[-_ ]daily|daily[-_ ]arxiv|"
+    r"daily[-_ ]papers|papers[-_ ]daily|"
+    r"paper[-_ ]digest|"
     r"awesome[-_ ]papers|paper[-_ ]feed|"
-    r"arxiv[-_ ]monitor|paper[-_ ]aggregator)",
+    r"arxiv[-_ ]monitor|paper[-_ ]aggregator|"
+    r"arxiv[-_ ]favor|"
+    r"paper[-_ ]discovery)",
     re.IGNORECASE
 )
 
@@ -658,7 +655,7 @@ async def collect_github_repositories():
                 cleared
             )
 
-            papers = db_session.query(
+            all_unlinked = db_session.query(
                 ResearchPaper
             ).filter(
                 ResearchPaper.arxiv_id.isnot(None),
@@ -666,9 +663,25 @@ async def collect_github_repositories():
                 ResearchPaper.github_url.is_(None)
             ).order_by(
                 ResearchPaper.id.asc()
-            ).limit(
-                MAX_PAPERS_PER_RUN
             ).all()
+
+            papers = []
+
+            for candidate in all_unlinked:
+                raw = candidate.raw_data or {}
+
+                if not isinstance(raw, dict):
+                    raw = {}
+
+                history = raw.get("github_search_history", {})
+
+                if history.get("status") == "completed":
+                    continue
+
+                papers.append(candidate)
+
+                if len(papers) >= MAX_PAPERS_PER_RUN:
+                    break
 
             total = len(papers)
 
@@ -685,6 +698,17 @@ async def collect_github_repositories():
                     )
 
                     searched += 1
+
+                    raw = paper.raw_data or {}
+                    if not isinstance(raw, dict):
+                        raw = {}
+
+                    raw["github_search_history"] = {
+                        "status": "completed",
+                        "searched_at": datetime.now(timezone.utc).isoformat()
+                    }
+                    paper.raw_data = raw
+                    flag_modified(paper, "raw_data")
 
                     if repository:
                         save_verified_repository(
