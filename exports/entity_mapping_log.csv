@@ -1,1 +1,4 @@
 ﻿id,original_name,canonical_name,entity_type,confidence,method,source_url,created_at
+1,Scale AI,Scale AI,startup,1.0,exact_normalization,https://www.ycombinator.com/companies/scale-ai,2026-11-22 17:33:46.474633
+2,Replicate,Replicate,startup,1.0,exact_normalization,https://www.ycombinator.com/companies/replicate,2026-11-22 17:33:46.509376
+3,Cohere,Cohere,startup,1.0,exact_normalization,https://www.ycombinator.com/companies/cohere,2026-11-22 17:33:46.526935

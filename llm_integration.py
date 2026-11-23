@@ -1,4 +1,5 @@
-﻿import asyncio
+﻿
+import asyncio
 import json
 import logging
 from typing import Any, Optional
@@ -13,7 +14,7 @@ from models import (
     JobModel,
     NewsModel,
 )
-from entity_resolver import resolve_entity
+from entity_resolver import resolve_entity, save_entity_mapping
 
 logger = logging.getLogger("AI_Intelligence_Pipeline")
 
@@ -111,7 +112,6 @@ def parse_json_response(response: str) -> dict:
     cleaned = response.strip()
 
     if cleaned.startswith("```"):
-
         lines = cleaned.splitlines()
 
         if lines and lines[0].startswith("```"):
@@ -126,7 +126,6 @@ def parse_json_response(response: str) -> dict:
         data = json.loads(cleaned)
 
     except json.JSONDecodeError:
-
         start = cleaned.find("{")
         end = cleaned.rfind("}")
 
@@ -155,31 +154,60 @@ def resolve_company_fields(
 ) -> dict:
 
     if entity_type == "startup":
-
         name = data.get("name")
 
-        if name:
-            result = resolve_entity(name)
+    elif entity_type in {"product", "job"}:
+        name = data.get("company_name")
 
-            if result.get("resolved"):
+    else:
+        name = None
+
+    if name:
+        result = resolve_entity(name)
+
+        if result.get("resolved"):
+            if entity_type == "startup":
                 data["normalized_name"] = (
                     result["canonical_name"]
                 )
-
-    elif entity_type in {"product", "job"}:
-
-        company_name = data.get("company_name")
-
-        if company_name:
-
-            result = resolve_entity(company_name)
-
-            if result.get("resolved"):
+            else:
                 data["company_name"] = (
                     result["canonical_name"]
                 )
 
     return data
+
+
+# ============================================================
+# ENTITY MAPPING LOGGING
+# ============================================================
+
+def log_entity_mapping(
+    entity_type: str,
+    original_name: Optional[str],
+    source_url: Optional[str] = None
+) -> bool:
+
+    if not original_name:
+        return False
+
+    if entity_type not in {"startup", "product", "job"}:
+        return False
+
+    result = resolve_entity(original_name)
+
+    if not result.get("resolved"):
+        logger.warning(
+            "Entity not resolved: %s",
+            original_name
+        )
+        return False
+
+    return save_entity_mapping(
+        result,
+        entity_type=entity_type,
+        source_url=source_url
+    )
 
 
 # ============================================================
@@ -193,7 +221,6 @@ async def extract_record(
 ) -> dict[str, Any]:
 
     if entity_type not in MODEL_REGISTRY:
-
         return {
             "success": False,
             "entity_type": entity_type,
@@ -202,7 +229,6 @@ async def extract_record(
         }
 
     if not source_text or not source_text.strip():
-
         return {
             "success": False,
             "entity_type": entity_type,
@@ -211,7 +237,6 @@ async def extract_record(
         }
 
     try:
-
         prompt = build_extraction_prompt(
             entity_type,
             source_text,
@@ -221,7 +246,6 @@ async def extract_record(
         llm_result = await generate(prompt)
 
         if not llm_result.get("success"):
-
             return {
                 "success": False,
                 "entity_type": entity_type,
@@ -232,6 +256,14 @@ async def extract_record(
         extracted_data = parse_json_response(
             llm_result["response"]
         )
+
+        # Preserve the original company name for mapping.
+        if entity_type == "startup":
+            original_entity_name = extracted_data.get("name")
+        elif entity_type in {"product", "job"}:
+            original_entity_name = extracted_data.get("company_name")
+        else:
+            original_entity_name = None
 
         extracted_data = resolve_company_fields(
             entity_type,
@@ -244,9 +276,25 @@ async def extract_record(
 
         model_class = MODEL_REGISTRY[entity_type]
 
+        # Validate before saving mapping.
         validated_record = model_class.model_validate(
             extracted_data
         )
+
+        # Save only after successful validation.
+        if original_entity_name:
+            try:
+                log_entity_mapping(
+                    entity_type=entity_type,
+                    original_name=original_entity_name,
+                    source_url=source_url
+                )
+            except Exception:
+                # Mapping logging must not discard a valid record.
+                logger.exception(
+                    "Entity mapping logging failed for %s",
+                    original_entity_name
+                )
 
         logger.info(
             "Successfully extracted and validated %s",
@@ -264,7 +312,6 @@ async def extract_record(
         }
 
     except ValidationError as exc:
-
         logger.error(
             "Pydantic validation failed: %s",
             exc
@@ -278,7 +325,6 @@ async def extract_record(
         }
 
     except Exception as exc:
-
         logger.exception(
             "Extraction failed for %s",
             entity_type
@@ -333,7 +379,6 @@ def main():
     print("\nRegistered extraction models:")
 
     for entity_type, model_class in MODEL_REGISTRY.items():
-
         print(
             f"{entity_type} -> {model_class.__name__}"
         )

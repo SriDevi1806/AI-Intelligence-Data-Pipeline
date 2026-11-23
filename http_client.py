@@ -1,6 +1,7 @@
 
 import asyncio
 import random
+import json
 
 import aiohttp
 
@@ -12,10 +13,11 @@ from config import (
 
 from logger import logger
 
+from anti_bot import (
+    detect_protection,
+    get_fallback_strategy
+)
 
-# --------------------------------------------------
-# HTTP CLIENT
-# --------------------------------------------------
 
 class HTTPClient:
 
@@ -76,6 +78,68 @@ class HTTPClient:
             logger.info("HTTP client session closed.")
 
     # --------------------------------------------------
+    # RESPONSE FALLBACK HANDLER
+    # --------------------------------------------------
+
+    def handle_fallback(
+        self,
+        url,
+        protection,
+        status
+    ):
+
+        strategy = get_fallback_strategy(
+            protection,
+            status
+        )
+
+        logger.warning(
+            "Fallback decision | URL=%s | Action=%s | Strategy=%s",
+            url,
+            strategy["action"],
+            strategy["strategy"]
+        )
+
+        if strategy["action"] == "BROWSER_RENDER":
+
+            logger.info(
+                "Authorized JavaScript rendering may be considered: %s",
+                url
+            )
+
+        elif strategy["action"] == "ALTERNATIVE_SOURCE":
+
+            logger.warning(
+                "Use an alternative authorized public source: %s",
+                url
+            )
+
+        elif strategy["action"] == "MANUAL_REVIEW":
+
+            logger.warning(
+                "Manual review required. Do not bypass CAPTCHA: %s",
+                url
+            )
+
+        return strategy
+
+    # --------------------------------------------------
+    # RESPONSE FORMATTER
+    # --------------------------------------------------
+
+    @staticmethod
+    def format_response(status, body, return_status):
+
+        if return_status:
+
+            return {
+                "status": status,
+                "body": body
+            }
+
+        return None
+
+    # --------------------------------------------------
     # ASYNC GET REQUEST
     # --------------------------------------------------
 
@@ -83,7 +147,8 @@ class HTTPClient:
         self,
         url: str,
         params=None,
-        headers=None
+        headers=None,
+        return_status=False
     ):
 
         if self.session is None or self.session.closed:
@@ -95,6 +160,8 @@ class HTTPClient:
         }
 
         for attempt in range(MAX_RETRIES + 1):
+
+            delay = None
 
             try:
 
@@ -108,22 +175,138 @@ class HTTPClient:
 
                         status = response.status
 
+                        response_headers = dict(
+                            response.headers
+                        )
+
+                        # ----------------------------------
+                        # SUCCESS RESPONSE
+                        # ----------------------------------
+
                         if status == 200:
 
-                            content_type = response.headers.get(
-                                "Content-Type", ""
+                            body = await response.text()
+
+                            protection = detect_protection(
+                                body,
+                                status,
+                                response_headers
                             )
 
-                            if "application/json" in content_type:
-                                return await response.json(
-                                    content_type=None
+                            if protection:
+
+                                self.handle_fallback(
+                                    url,
+                                    protection,
+                                    status
                                 )
 
-                            return await response.text()
+                                return self.format_response(
+                                    status,
+                                    body,
+                                    return_status
+                                )
 
-                        if status == 429 or status in {
-                            408, 500, 502, 503, 504
+                            content_type = response.headers.get(
+                                "Content-Type",
+                                ""
+                            ).lower()
+
+                            if "application/json" in content_type:
+
+                                try:
+
+                                    data = json.loads(body)
+
+                                    if return_status:
+
+                                        return {
+                                            "status": status,
+                                            "body": data
+                                        }
+
+                                    return data
+
+                                except ValueError:
+
+                                    logger.warning(
+                                        "Invalid JSON response: %s",
+                                        url
+                                    )
+
+                                    return None
+
+                            if return_status:
+
+                                return {
+                                    "status": status,
+                                    "body": body
+                                }
+
+                            return body
+
+                        # ----------------------------------
+                        # ACCESS DENIED
+                        # ----------------------------------
+
+                        if status in {401, 403}:
+
+                            body = await response.text()
+
+                            protection = detect_protection(
+                                body,
+                                status,
+                                response_headers
+                            )
+
+                            self.handle_fallback(
+                                url,
+                                protection,
+                                status
+                            )
+
+                            logger.error(
+                                "Access denied: %s | HTTP %s",
+                                url,
+                                status
+                            )
+
+                            return self.format_response(
+                                status,
+                                body,
+                                return_status
+                            )
+
+                        # ----------------------------------
+                        # NOT FOUND
+                        # ----------------------------------
+
+                        elif status == 404:
+
+                            logger.info(
+                                "HTTP 404 returned: %s",
+                                url
+                            )
+
+                            return self.format_response(
+                                status,
+                                None,
+                                return_status
+                            )
+
+                        # ----------------------------------
+                        # RETRYABLE RESPONSES
+                        # ----------------------------------
+
+                        elif status in {
+                            408, 429, 500, 502, 503, 504
                         }:
+
+                            strategy = self.handle_fallback(
+                                url,
+                                None,
+                                status
+                            )
 
                             if attempt == MAX_RETRIES:
 
@@ -133,13 +316,20 @@ class HTTPClient:
                                     status
                                 )
 
-                                return None
+                                return self.format_response(
+                                    status,
+                                    None,
+                                    return_status
+                                )
 
                             retry_after = response.headers.get(
                                 "Retry-After"
                             )
 
-                            if retry_after and retry_after.isdigit():
+                            if (
+                                retry_after
+                                and retry_after.isdigit()
+                            ):
 
                                 delay = min(
                                     float(retry_after),
@@ -149,7 +339,11 @@ class HTTPClient:
                             else:
 
                                 delay = min(
-                                    2 ** attempt + random.uniform(0, 1),
+                                    strategy.get("delay")
+                                    or (
+                                        2 ** attempt
+                                        + random.uniform(0, 1)
+                                    ),
                                     60.0
                                 )
 
@@ -170,9 +364,16 @@ class HTTPClient:
                                 status
                             )
 
-                            return None
+                            return self.format_response(
+                                status,
+                                None,
+                                return_status
+                            )
 
-                await asyncio.sleep(delay)
+                # Sleep outside semaphore
+                if delay is not None:
+
+                    await asyncio.sleep(delay)
 
             except asyncio.TimeoutError:
 
@@ -198,12 +399,18 @@ class HTTPClient:
 
                 return None
 
+            # ----------------------------------
+            # RETRY AFTER NETWORK ERRORS
+            # ----------------------------------
+
             if attempt < MAX_RETRIES:
 
-                delay = min(
-                    2 ** attempt + random.uniform(0, 1),
-                    60.0
-                )
+                if delay is None:
+
+                    delay = min(
+                        2 ** attempt + random.uniform(0, 1),
+                        60.0
+                    )
 
                 await asyncio.sleep(delay)
 
@@ -216,7 +423,7 @@ class HTTPClient:
 
 
 # --------------------------------------------------
-# TESTING
+# LOCAL TEST ENTRY POINT
 # --------------------------------------------------
 
 async def main():
@@ -231,7 +438,6 @@ async def main():
 
         await client.start()
 
-        # Public test endpoint
         result = await client.get(
             "https://httpbin.org/get"
         )
@@ -241,13 +447,12 @@ async def main():
             print("\nHTTP request successful!")
 
             if isinstance(result, dict):
+
                 print("Response type: JSON")
-                print(
-                    "URL:",
-                    result.get("url")
-                )
+                print("URL:", result.get("url"))
 
             else:
+
                 print("Response received.")
 
         else:

@@ -1,179 +1,153 @@
 # AI Intelligence Data Pipeline
 
-An automated Python-based data collection and export system for gathering AI-related information from multiple sources and organizing it into structured datasets.
+An automated Python pipeline for collecting, processing, enriching, storing and exporting AI ecosystem data from public APIs, RSS feeds and configured job boards.
 
-## Project Overview
+## 1. Project Overview
 
-The AI Intelligence Data Pipeline collects, processes, stores and exports information about AI startups, applications, research papers, job opportunities and AI industry news.
+The pipeline gathers information about:
 
-Collected records are stored in a local SQLite database and can be exported to CSV files and Google Sheets.
+- AI startups
+- AI applications and Hugging Face Spaces
+- AI research papers from arXiv
+- Related GitHub repositories and repository metadata
+- AI job opportunities
+- AI industry news
+- Entity resolution and canonical company mappings
 
-## Key Features
+Records are stored in SQLite and exported to CSV and Google Sheets.
 
-- **Startup collection:** Collects AI startup information using the Y Combinator API.
-- **AI applications:** Collects Hugging Face Spaces data.
-- **Research collection:** Collects AI research papers from arXiv.
-- **GitHub verification:** Searches for GitHub repositories related to research papers.
-- **Job collection:** Collects AI-related job listings from configured sources.
-- **News collection:** Collects AI industry news through RSS feeds.
-- **Data storage:** Uses SQLite for structured local storage.
-- **Data export:** Exports collected datasets to CSV.
-- **Google Sheets integration:** Uploads datasets to a configured Google spreadsheet.
-- **HTTP utilities:** Includes reusable HTTP and crawler modules.
-- **LLM integration:** Includes LLM integration and fallback modules.
+## 2. Key Features
 
-## Technology Stack
+- Asynchronous HTTP requests and reusable crawler utilities.
+- Startup, product/application, research, job and news collectors.
+- Date parsing and rolling 24-hour freshness filtering.
+- Duplicate detection and SQLite persistence.
+- Entity normalization and fuzzy matching against a seed list.
+- GitHub repository search and implementation-evidence heuristics.
+- LLM provider fallback: Gemini Flash → Groq → DeepSeek.
+- HTTP 413 chunking and HTTP 429 retry/backoff handling.
+- Cloudflare/DataDome detection and responsible fallback strategies.
+- CSV and Google Sheets export.
 
-- Python
-- SQLite
-- REST APIs
-- RSS feeds
-- Hugging Face
-- arXiv
-- GitHub
-- Google Sheets API
-- CSV
+## 3. Technology Stack
 
-## Project Structure
+Python, SQLite, aiohttp, BeautifulSoup, lxml, Playwright, REST APIs, RSS, arXiv, Hugging Face, GitHub API and Google Sheets API.
+
+## 4. Project Structure
 
 ```text
 AI-Intelligence-Data-Pipeline/
-│
-├── config.py
-├── database.py
-├── models.py
-├── logger.py
-├── http_client.py
-├── crawler.py
-├── date_utils.py
-├── entity_resolver.py
-├── source_registry.py
-│
-├── startup_collector.py
-├── product_collector.py
-├── research_collector.py
-├── github_collector.py
-├── job_collector.py
-├── job_sources.py
-├── news_collector.py
-│
-├── llm_integration.py
-├── llm_fallback.py
-├── export_data.py
-├── google_sheets_exporter.py
-├── pipeline.py
-├── main.py
-├── verify_jobs.py
-│
+├── src/
+│   ├── __init__.py
+│   ├── config.py
+│   ├── database.py
+│   ├── models.py
+│   ├── logger.py
+│   ├── http_client.py
+│   ├── crawler.py
+│   ├── anti_bot.py
+│   ├── browser_renderer.py
+│   ├── date_utils.py
+│   ├── entity_resolver.py
+│   ├── source_registry.py
+│   ├── startup_collector.py
+│   ├── product_collector.py
+│   ├── research_collector.py
+│   ├── github_collector.py
+│   ├── job_collector.py
+│   ├── job_sources.py
+│   ├── news_collector.py
+│   ├── llm_fallback.py
+│   ├── llm_integration.py
+│   ├── export_data.py
+│   ├── google_sheets_exporter.py
+│   ├── pipeline.py
+│   └── main.py
 ├── exports/
-│   ├── startups.csv
-│   ├── products.csv
-│   ├── research_papers.csv
-│   ├── jobs.csv
-│   ├── news.csv
-│   └── entity_mapping_log.csv
-│
+├── data/
+├── architecture.pdf
+├── README.md
 ├── requirements.txt
-├── .gitignore
-└── README.md
+└── .gitignore
 ```
 
-## Dataset Snapshot
+The root-level Python modules are retained for the current execution workflow. The `src/` directory contains the organized source-code package copy.
 
-The current exported dataset contains:
-
-| Dataset | Records |
-|---|---:|
-| AI Startups | 1,894 |
-| AI Applications (Hugging Face Spaces) | 1,975 |
-| AI Research Papers | 1,000 |
-| AI Jobs | 2 |
-| AI News | 7 |
-| Entity Mapping Log | 0 |
-| **Total** | **4,878** |
-
-These figures represent the current collection snapshot and may change when the pipeline runs again.
-
-## Installation
-
-Clone the repository:
-
-```bash
-git clone https://github.com/SriDevi1806/AI-Intelligence-Data-Pipeline.git
-cd AI-Intelligence-Data-Pipeline
-```
-
-Create and activate a virtual environment:
-
-```bash
-python -m venv venv
-```
-
-Windows PowerShell:
+## 5. Installation
 
 ```powershell
+python -m venv venv
 .\venv\Scripts\Activate.ps1
-```
-
-Install dependencies:
-
-```bash
 pip install -r requirements.txt
 ```
 
-## Configuration
+Configure API credentials in a local `.env` file. Never commit API keys or service-account credentials.
 
-Create a local `.env` file in the project root and configure the API credentials and settings required by the collectors and integrations.
+## 6. Running the Pipeline
 
-Keep all API keys, service-account credentials and private configuration files out of GitHub.
+Run the main pipeline:
 
-The Google Sheets exporter requires a configured Google service account and access to the target spreadsheet.
-
-## Run the Pipeline
-
-Run the main application:
-
-```bash
+```powershell
 python main.py
 ```
 
-Optional execution flags:
+Export collected datasets:
 
-```bash
-python pipeline.py --skip-github
+```powershell
+python export_data.py
 ```
 
-```bash
-python pipeline.py --skip-sheets
+Run entity mapping:
+
+```powershell
+python populate_entity_mapping.py
 ```
 
-```bash
-python pipeline.py --skip-github --skip-sheets
-```
+## 7. Data Outputs
 
-The pipeline executes its configured collection stages, exports CSV data and optionally uploads the results to Google Sheets.
+CSV exports include:
 
-Running the pipeline again may make external API requests and update the collected data.
+- startups.csv
+- products.csv
+- research_papers.csv
+- jobs.csv
+- news.csv
+- entity_mapping_log.csv
 
-## Exported Data
+Google Sheets export supports six corresponding datasets.
 
-CSV files are generated in the `exports/` directory.
+## 8. Reliability and Data Quality
 
-The project uses SQLite for local persistence. Database files and credentials are intentionally excluded from the public Git repository.
+The implementation includes retry handling, exponential backoff with jitter, Retry-After support, duplicate checks, date validation and LLM provider fallback.
 
-## Important Notes
+HTTP 413 handling uses recursive prompt chunking. Merged extraction output still requires structured validation.
 
-- Data availability depends on the external APIs and feeds.
-- API rate limits and access restrictions may affect collection.
-- Some integrations require valid credentials and service-account permissions.
-- The dataset figures above are a snapshot, not guaranteed future collection totals.
-- GitHub repository matches should be reviewed before treating them as verified research implementations.
-- LLM functionality requires valid provider credentials when live model requests are used.
+Crawler protection handling detects common Cloudflare, DataDome and CAPTCHA signals. Browser rendering is intended only for authorized access; CAPTCHA and persistent access restrictions require manual review or an alternative permitted source.
 
-## Repository
+GitHub matching uses repository metadata and implementation-evidence heuristics. Repository associations should not be treated as independently verified semantic matches without review.
+
+## 9. Scalability Architecture
+
+The accompanying `architecture.pdf` describes a proposed production design for 500,000+ records using distributed workers, a durable queue, PostgreSQL, object storage, search/vector indexing and centralized monitoring.
+
+The current project is a local Python/SQLite implementation. Distributed deployment and 500,000-record load testing have not yet been established.
+
+## 10. Verification and Limitations
+
+Selected local tests and mocked HTTP retry/fallback tests have been performed.
+
+Live LLM provider requests, full browser-rendering behavior against protected websites, complete source coverage, dynamic GitHub star refresh across the entire paper dataset and distributed performance benchmarks remain subject to further verification.
+
+Dataset counts and freshness should be taken from the latest successful collection run.
+
+## 11. Security
+
+- Keep `.env` out of Git.
+- Never commit service-account JSON files.
+- Exclude databases, backups, virtual environments and logs.
+- Rotate any credentials that may have been exposed.
+- Use authorized public APIs and respect source access policies.
+
+## 12. Repository
 
 GitHub: https://github.com/SriDevi1806/AI-Intelligence-Data-Pipeline
-
-## License
-
-See the repository's license information before reusing or distributing this project.

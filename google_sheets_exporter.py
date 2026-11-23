@@ -5,7 +5,9 @@ from pathlib import Path
 
 import gspread
 from dotenv import load_dotenv
-
+import os
+import csv
+from pathlib import Path
 
 # ============================================================
 # CONFIGURATION
